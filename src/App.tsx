@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import Globe3D from './components/Globe';
 import FoundationModelPanel from './components/FoundationModelPanel';
+import AICenterPanel from './components/AICenterPanel';
 import { t, Locale, getLocaleName } from './i18n';
 import { dataSources, resources, getActiveSourcesCount, getNotConfiguredCount, getKeylessSourcesCount } from './data/sources';
 import type { ResourceStatus, OperationalMode, MicrophoneState } from './types';
@@ -36,6 +37,7 @@ function App() {
   const [selectedEntity, setSelectedEntity] = useState<GeoEntity | null>(null);
   const [evidenceCount, setEvidenceCount] = useState(0);
   const [showFoundationModel, setShowFoundationModel] = useState(false);
+  const [showAICenter, setShowAICenter] = useState(false);
   
   // Source management
   const { sources, isInitialized, fetchSource, enableSource, disableSource, startAutoRefresh, getAllEntities } = useSources();
@@ -716,6 +718,19 @@ function App() {
             <Brain size={14} />
             <span className="hidden md:inline">AI Model</span>
           </button>
+
+          <button
+            onClick={() => setShowAICenter(!showAICenter)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] transition-all ${
+              showAICenter
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+            }`}
+            title="AI Command & Training Center"
+          >
+            <Brain size={14} />
+            <span className="hidden md:inline">AI Center</span>
+          </button>
         </div>
 
         {/* Coordinates display */}
@@ -729,6 +744,13 @@ function App() {
       {showFoundationModel && (
         <div className="fixed bottom-14 left-3 z-50 w-80 max-h-[70vh] overflow-y-auto custom-scrollbar">
           <FoundationModelPanel />
+        </div>
+      )}
+
+      {/* AI CENTER PANEL */}
+      {showAICenter && (
+        <div className="fixed bottom-14 left-3 z-50 w-[500px] max-h-[80vh] overflow-y-auto custom-scrollbar">
+          <AICenterPanel />
         </div>
       )}
 

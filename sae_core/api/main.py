@@ -44,6 +44,10 @@ app = FastAPI(
 from ..promotion.api import router as promotion_router
 app.include_router(promotion_router)
 
+# Include AI Center router
+from ..ai_center.api import router as ai_center_router
+app.include_router(ai_center_router)
+
 # CORS middleware
 config = get_config()
 app.add_middleware(

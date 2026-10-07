@@ -133,6 +133,28 @@ from .promotion import (
     promotion_router,
 )
 
+# AI Command & Training Center
+from .ai_center import (
+    AICommand,
+    AICommandStatus,
+    AIIntent,
+    ModelCapability,
+    AIModel,
+    ModelStatus,
+    TrainingJob,
+    TrainingStatus,
+    Dataset,
+    DatasetStatus,
+    Checkpoint,
+    EvaluationRun,
+    Experiment,
+    CommandCenter,
+    ModelRegistry,
+    ModelRouter,
+    TrainingCenter,
+    InferenceCenter,
+)
+
 __all__ = [
     # Version
     "__version__",
@@ -236,4 +258,24 @@ __all__ = [
     "PromotionDecision",
     "PromotionService",
     "promotion_router",
+    
+    # AI Center
+    "AICommand",
+    "AICommandStatus",
+    "AIIntent",
+    "ModelCapability",
+    "AIModel",
+    "ModelStatus",
+    "TrainingJob",
+    "TrainingStatus",
+    "Dataset",
+    "DatasetStatus",
+    "Checkpoint",
+    "EvaluationRun",
+    "Experiment",
+    "CommandCenter",
+    "ModelRegistry",
+    "ModelRouter",
+    "TrainingCenter",
+    "InferenceCenter",
 ]
