@@ -98,13 +98,15 @@ class UNetEncoder(nn.Module):
     
     def __init__(
         self,
-        in_channels: int = 2,
+        in_channels: int = 4,
         encoder_channels: list[int] = [64, 128, 256, 512],
         use_residual: bool = True
     ) -> None:
         """
         Args:
-            in_channels: Input channels (amplitude + phase = 2)
+            in_channels: Input channels. Default 4 for dual-pol SLC
+                         (VV real, VV imag, VH real, VH imag).
+                         Use 2 for single-pol amplitude+phase.
             encoder_channels: Output channels at each level
             use_residual: Whether to use residual connections
         """

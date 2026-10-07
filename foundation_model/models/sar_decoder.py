@@ -50,7 +50,7 @@ class SARDecoder(nn.Module):
         latent_channels: int = 512,
         decoder_channels: list[int] = [256, 128, 64],
         skip_channels: list[int] = [256, 128, 64],
-        output_channels: int = 2  # amplitude + phase
+        output_channels: int = 4  # VV real, VV imag, VH real, VH imag (dual-pol)
     ) -> None:
         """
         Args:

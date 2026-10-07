@@ -71,7 +71,8 @@ data:
   
   # SAR
   sar_tile_size: 256
-  sar_channels: 2  # amplitude, phase
+  sar_channels: 4  # VV real, VV imaginary, VH real, VH imaginary
+  sar_representation: "dual_pol_real_imag"  # or "single_pol_amp_phase" for 2-channel
   sar_resolution: 10  # meters
 
 # Distributed Training

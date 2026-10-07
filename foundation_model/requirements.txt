@@ -1,0 +1,28 @@
+# GOD EYE SAE - Foundation Model Dependencies
+# For Phase 3B.1 computational validation
+
+# Core ML
+torch>=2.1.0
+torchvision>=0.16.0
+
+# Geometric deep learning (for PointNet++ operations)
+torch-geometric>=2.4.0
+
+# Configuration
+omegaconf>=2.3.0
+
+# Experiment tracking
+wandb>=0.16.0
+
+# Data handling
+h5py>=3.10.0
+numpy>=1.24.0
+
+# Metrics
+scikit-learn>=1.3.0
+
+# Testing
+pytest>=7.4.0
+
+# Satellite orbit propagation
+satellite.js>=5.0.0

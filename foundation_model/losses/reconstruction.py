@@ -113,26 +113,38 @@ class ReconstructionLoss(nn.Module):
         self,
         pred_slc: torch.Tensor,
         target_slc: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> dict:
         """
         Compute SAR reconstruction loss.
         
+        Supports both 2-channel (single-pol amp/phase) and 4-channel
+        (dual-pol VV/VH real/imag) representations.
+        
         Args:
-            pred_slc: (B, 2, H, W) predicted (amplitude, phase)
-            target_slc: (B, 2, H, W) target SLC
+            pred_slc: (B, C, H, W) predicted SLC (C=2 or C=4)
+            target_slc: (B, C, H, W) target SLC (C=2 or C=4)
             
         Returns:
-            amp_loss: Amplitude L1 loss
-            phase_loss: Phase angular loss
+            Dictionary with amplitude and phase losses per polarization
         """
-        # Amplitude L1
-        amp_loss = F.l1_loss(pred_slc[:, 0], target_slc[:, 0])
+        from ..utils.sar_polarization import dual_pol_reconstruction_loss, circular_phase_loss
         
-        # Phase angular loss (circular distance)
-        phase_diff = pred_slc[:, 1] - target_slc[:, 1]
-        phase_loss = 1 - torch.cos(phase_diff).mean()
-        
-        return amp_loss, phase_loss
+        if pred_slc.shape[1] == 4:
+            # Dual-pol real/imag representation
+            return dual_pol_reconstruction_loss(pred_slc, target_slc)
+        elif pred_slc.shape[1] == 2:
+            # Single-pol amplitude/phase representation (legacy)
+            amp_loss = F.l1_loss(pred_slc[:, 0], target_slc[:, 0])
+            phase_loss = circular_phase_loss(pred_slc[:, 1], target_slc[:, 1])
+            return {
+                'vv_amplitude': amp_loss,
+                'vv_phase': phase_loss,
+                'vh_amplitude': torch.tensor(0.0, device=pred_slc.device),
+                'vh_phase': torch.tensor(0.0, device=pred_slc.device),
+                'total': amp_loss + phase_loss,
+            }
+        else:
+            raise ValueError(f"Expected 2 or 4 SAR channels, got {pred_slc.shape[1]}")
     
     def forward(
         self,
@@ -149,7 +161,11 @@ class ReconstructionLoss(nn.Module):
             Dictionary with individual losses and total
         """
         lidar_l1, lidar_chamfer = self.lidar_loss(pred_lidar, target_lidar, lidar_mask)
-        sar_amp, sar_phase = self.sar_loss(pred_sar, target_sar)
+        sar_losses = self.sar_loss(pred_sar, target_sar)
+        
+        # Aggregate amplitude and phase losses across polarizations
+        sar_amp = sar_losses['vv_amplitude'] + sar_losses['vh_amplitude']
+        sar_phase = sar_losses['vv_phase'] + sar_losses['vh_phase']
         
         total = (
             self.lambda_lidar_l1 * lidar_l1 +
@@ -163,5 +179,6 @@ class ReconstructionLoss(nn.Module):
             'lidar_chamfer': lidar_chamfer,
             'sar_amplitude': sar_amp,
             'sar_phase': sar_phase,
+            **{f'sar_{k}': v for k, v in sar_losses.items()},
             'total': total
         }
