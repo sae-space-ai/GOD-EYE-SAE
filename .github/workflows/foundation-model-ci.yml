@@ -1,0 +1,71 @@
+name: Foundation Model CI
+
+on:
+  push:
+    branches: [ main, develop, 'feature/**' ]
+    paths:
+      - 'foundation_model/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'foundation_model/**'
+
+jobs:
+  cpu-validation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install torch==2.1.0+cpu torchvision==0.16.0+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
+        pip install -r foundation_model/requirements.txt
+    
+    - name: Check environment
+      run: |
+        cd foundation_model
+        python check_environment.py
+    
+    - name: Validate configuration
+      run: |
+        cd foundation_model
+        python validate_config.py
+    
+    - name: Create synthetic dataset
+      run: |
+        cd foundation_model
+        python create_synthetic_dataset.py \
+          --output runtime/data/synthetic/train.hdf5 \
+          --num-train 8 \
+          --num-val 4 \
+          --num-test 4
+    
+    - name: Run pytest
+      run: |
+        cd foundation_model
+        pytest tests/ -v --tb=short
+    
+    - name: Compile check
+      run: |
+        python -m compileall foundation_model/
+    
+    - name: Run Phase 3B.1 validation (reduced)
+      run: |
+        cd foundation_model
+        python validate_phase3b1.py --overfit-steps 10
+    
+    - name: Upload validation report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: validation-report
+        path: foundation_model/validation_report_phase3b1.json
