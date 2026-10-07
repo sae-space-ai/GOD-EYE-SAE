@@ -9,6 +9,7 @@ import {
   BarChart3, Globe2, Wifi, WifiOff, CheckCircle2, AlertCircle
 } from 'lucide-react';
 import Globe3D from './components/Globe';
+import FoundationModelPanel from './components/FoundationModelPanel';
 import { t, Locale, getLocaleName } from './i18n';
 import { dataSources, resources, getActiveSourcesCount, getNotConfiguredCount, getKeylessSourcesCount } from './data/sources';
 import type { ResourceStatus, OperationalMode, MicrophoneState } from './types';
@@ -34,6 +35,7 @@ function App() {
   const [globeReady, setGlobeReady] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<GeoEntity | null>(null);
   const [evidenceCount, setEvidenceCount] = useState(0);
+  const [showFoundationModel, setShowFoundationModel] = useState(false);
   
   // Source management
   const { sources, isInitialized, fetchSource, enableSource, disableSource, startAutoRefresh, getAllEntities } = useSources();
@@ -701,6 +703,19 @@ function App() {
             <Palette size={14} />
             <span className="hidden md:inline">{t('tools.presets', locale)}</span>
           </button>
+
+          <button
+            onClick={() => setShowFoundationModel(!showFoundationModel)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[10px] transition-all ${
+              showFoundationModel
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+            }`}
+            title="Foundation Model"
+          >
+            <Brain size={14} />
+            <span className="hidden md:inline">AI Model</span>
+          </button>
         </div>
 
         {/* Coordinates display */}
@@ -709,6 +724,13 @@ function App() {
           <span>LNG {coordinates.lng.toFixed(2)}°</span>
         </div>
       </footer>
+
+      {/* FOUNDATION MODEL PANEL */}
+      {showFoundationModel && (
+        <div className="fixed bottom-14 left-3 z-50 w-80 max-h-[70vh] overflow-y-auto custom-scrollbar">
+          <FoundationModelPanel />
+        </div>
+      )}
 
       {/* MISSION MODAL */}
       {showMission && (

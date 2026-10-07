@@ -1,0 +1,94 @@
+# Foundation Model Configuration
+# LiDAR-SAR Multimodal Autoencoder
+
+# Model Architecture
+model:
+  latent_dim: 256
+  num_heads: 8
+  num_layers: 4
+  dropout: 0.1
+  
+  # LiDAR Branch (PointNet++)
+  lidar:
+    shared_mlp_layers: [64, 128, 256]
+    knn_k: 16
+    local_mlp_layers: [64, 128, 256]
+    global_mlp_layers: [512, 1024]
+    
+  # SAR Branch (U-Net)
+  sar:
+    encoder_channels: [64, 128, 256, 512]
+    decoder_channels: [256, 128, 64]
+    residual_connections: true
+    
+  # Fusion Transformer
+  fusion:
+    num_layers: 4
+    num_heads: 8
+    dim_feedforward: 1024
+    asymmetric_gating: true
+
+# Training
+training:
+  batch_size: 8
+  num_epochs: 200
+  learning_rate: 3e-4
+  weight_decay: 1e-5
+  gradient_accumulation_steps: 4
+  
+  # Mixed Precision
+  precision: "bf16"
+  
+  # Masking (MAE)
+  lidar_mask_ratio: 0.75
+  sar_mask_ratio: 0.60
+  
+  # Contrastive Learning
+  contrastive:
+    temperature: 0.07
+    rotation_range: 30  # degrees
+    sar_noise_sigma: 0.05
+    lidar_dropout: 0.10
+  
+  # Loss weights
+  loss_weights:
+    mae: 1.0
+    contrastive: 0.5
+    decoupling: 0.3
+    reconstruction_lidar: 1.0
+    reconstruction_sar: 1.0
+
+# Data
+data:
+  train_path: "data/train.hdf5"
+  val_path: "data/val.hdf5"
+  num_workers: 4
+  pin_memory: true
+  
+  # LiDAR
+  lidar_max_points: 8192
+  lidar_channels: 4  # x, y, z, intensity
+  
+  # SAR
+  sar_tile_size: 256
+  sar_channels: 2  # amplitude, phase
+  sar_resolution: 10  # meters
+
+# Distributed Training
+distributed:
+  backend: "nccl"
+  find_unused_parameters: false
+
+# Logging
+logging:
+  wandb_project: "lidar-sar-foundation"
+  wandb_entity: null  # Set to your username
+  log_interval: 10
+  save_interval: 10
+  seed: 42
+
+# Downstream Evaluation
+downstream:
+  num_classes: 5
+  linear_probe_epochs: 50
+  linear_probe_lr: 1e-3
