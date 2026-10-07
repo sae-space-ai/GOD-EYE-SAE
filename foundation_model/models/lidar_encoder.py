@@ -69,12 +69,14 @@ class PointNetPPSetAbstraction(nn.Module):
     def forward(
         self,
         xyz: torch.Tensor,
-        features: Optional[torch.Tensor] = None
+        features: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             xyz: (B, N, 3) point coordinates
             features: (B, C, N) point features (optional)
+            mask: (B, N) boolean mask for valid points (optional)
             
         Returns:
             new_xyz: (B, N', 3) sampled points
@@ -88,8 +90,8 @@ class PointNetPPSetAbstraction(nn.Module):
         if features is None:
             features = xyz.transpose(1, 2)  # (B, 3, N)
         
-        # KNN grouping
-        grouped_features = self._knn_group(xyz, features)  # (B, C, N, k)
+        # KNN grouping with mask support
+        grouped_features = self._knn_group(xyz, features, mask)  # (B, C, N, k)
         
         # Apply MLP
         B, C, N_pts, K = grouped_features.shape
@@ -106,14 +108,16 @@ class PointNetPPSetAbstraction(nn.Module):
     def _knn_group(
         self,
         xyz: torch.Tensor,
-        features: torch.Tensor
+        features: torch.Tensor,
+        mask: torch.Tensor | None = None
     ) -> torch.Tensor:
         """
-        Group features by KNN.
+        Group features by KNN with mask support.
         
         Args:
             xyz: (B, N, 3)
             features: (B, C, N)
+            mask: (B, N) optional mask for valid points
             
         Returns:
             grouped: (B, C, N, k)
@@ -121,12 +125,28 @@ class PointNetPPSetAbstraction(nn.Module):
         B, N, _ = xyz.shape
         _, C, _ = features.shape
         
+        # Handle small point clouds: use effective_k
+        effective_k = min(self.k, N - 1)
+        if effective_k < 1:
+            effective_k = 1
+        
         # Compute pairwise distances
         dist = torch.cdist(xyz, xyz)  # (B, N, N)
         
+        # Apply mask if provided: set padding distances to inf
+        if mask is not None:
+            # mask is (B, N), we need (B, N, N) for distances
+            mask_expanded = mask.unsqueeze(1) & mask.unsqueeze(2)  # (B, N, N)
+            dist = dist.masked_fill(~mask_expanded, float('inf'))
+        
         # Get k nearest neighbors (excluding self)
-        _, indices = torch.topk(dist, self.k + 1, dim=-1, largest=False)
-        indices = indices[:, :, 1:]  # Remove self (B, N, k)
+        _, indices = torch.topk(dist, effective_k + 1, dim=-1, largest=False)
+        indices = indices[:, :, 1:]  # Remove self (B, N, effective_k)
+        
+        # Pad if effective_k < self.k
+        if effective_k < self.k:
+            padding = indices[:, :, -1:].expand(-1, -1, self.k - effective_k)
+            indices = torch.cat([indices, padding], dim=-1)
         
         # Gather features
         indices = indices.unsqueeze(1).expand(-1, C, -1, -1)  # (B, C, N, k)
@@ -219,8 +239,8 @@ class PointNetPPEncoder(nn.Module):
         # Shared MLP
         shared_features = self.shared_mlp(features)  # (B, C_shared, N)
         
-        # Set abstraction for local features
-        _, local_features = self.sa_layer(xyz, shared_features)
+        # Set abstraction for local features with mask
+        _, local_features = self.sa_layer(xyz, shared_features, mask)
         local_features = local_features.transpose(1, 2)  # (B, N, local_dim)
         
         # Global feature via max pooling

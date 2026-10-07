@@ -43,7 +43,8 @@ class CrossModalMAELoss(nn.Module):
     def generate_masks(
         self,
         lidar_shape: Tuple[int, int],
-        sar_shape: Tuple[int, int, int, int]
+        sar_shape: Tuple[int, int, int, int],
+        device: torch.device | str = 'cpu'
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Generate random masks for both modalities.
@@ -51,6 +52,7 @@ class CrossModalMAELoss(nn.Module):
         Args:
             lidar_shape: (B, N) LiDAR shape
             sar_shape: (B, C, H, W) SAR shape
+            device: Device to create tensors on
             
         Returns:
             lidar_mask: (B, N) boolean mask (True = keep)
@@ -61,11 +63,11 @@ class CrossModalMAELoss(nn.Module):
         
         # LiDAR mask
         lidar_keep_ratio = 1.0 - self.lidar_mask_ratio
-        lidar_mask = torch.rand(B, N, device='cuda') < lidar_keep_ratio
+        lidar_mask = torch.rand(B, N, device=device) < lidar_keep_ratio
         
         # SAR mask (patch-level)
         sar_keep_ratio = 1.0 - self.sar_mask_ratio
-        sar_mask = torch.rand(B, H, W, device='cuda') < sar_keep_ratio
+        sar_mask = torch.rand(B, H, W, device=device) < sar_keep_ratio
         
         return lidar_mask, sar_mask
     
