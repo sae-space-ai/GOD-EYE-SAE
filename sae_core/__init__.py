@@ -124,6 +124,15 @@ from .execution import (
     ToolRegistry,
 )
 
+# Promotion Engine
+from .promotion import (
+    Campaign,
+    Promotion,
+    PromotionDecision,
+    PromotionService,
+    promotion_router,
+)
+
 __all__ = [
     # Version
     "__version__",
@@ -220,4 +229,11 @@ __all__ = [
     "ToolContract",
     "ExecutionEngine",
     "ToolRegistry",
+    
+    # Promotion
+    "Campaign",
+    "Promotion",
+    "PromotionDecision",
+    "PromotionService",
+    "promotion_router",
 ]

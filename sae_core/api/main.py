@@ -40,6 +40,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Include promotion router
+from ..promotion.api import router as promotion_router
+app.include_router(promotion_router)
+
 # CORS middleware
 config = get_config()
 app.add_middleware(
@@ -314,10 +318,64 @@ async def execute_mission(
             detail=decision.reason
         )
     
-    # TODO: Implement actual mission execution
+    # Execute mission using Mission Planner and Execution Engine
+    from ..planning.mission_planner import DeterministicMissionPlanner
+    from ..execution.engine import RealExecutionEngine, create_builtin_tools
+    from ..common.enums import IntentType, generate_id
+    
+    # Get mission
+    mission_repo = MissionRepository(db)
+    mission = mission_repo.get_by_id(mission_id)
+    
+    if not mission:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mission not found"
+        )
+    
+    # Create planner and execution engine
+    source_repo = SourceRepository(db)
+    model_repo = ModelRepository(db)
+    
+    # Note: In production, these would be populated from database
+    from ..sources.contracts import SourceRegistry
+    from ..ai.contracts import ModelRegistry
+    from ..events.contracts import EventBus
+    from ..security.contracts import ApprovalEngine, AuditEngine
+    
+    source_registry = SourceRegistry()
+    model_registry = ModelRegistry()
+    event_bus = EventBus()
+    approval_engine = ApprovalEngine()
+    audit_engine = AuditEngine()
+    
+    planner = DeterministicMissionPlanner(source_registry, model_registry)
+    tools = create_builtin_tools()
+    execution_engine = RealExecutionEngine(
+        tools=tools,
+        policy_engine=policy_engine,
+        approval_engine=approval_engine,
+        audit_engine=audit_engine,
+        event_bus=event_bus
+    )
+    
+    # Plan mission (default to EXPLORE_AREA intent)
+    intent = IntentType.EXPLORE_AREA
+    execution_graph = planner.plan(mission, intent)
+    
+    # Execute graph
+    context = {"mission_id": mission_id, "user_id": current_user.id}
+    results = execution_engine.execute_graph(execution_graph, current_user.id, context)
+    
+    # Update mission status
+    mission.status = "RUNNING"
+    mission_repo.update(mission)
+    
     return {
         "status": "execution_started",
         "mission_id": mission_id,
+        "execution_graph_id": execution_graph.id,
+        "nodes_count": len(execution_graph.nodes),
         "timestamp": datetime.utcnow().isoformat()
     }
 
