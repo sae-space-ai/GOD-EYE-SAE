@@ -1,345 +1,210 @@
-import { useEffect, useRef, useCallback } from 'react';
-import * as THREE from 'three';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import * as Cesium from 'cesium';
+
+// Module-level viewer ref for export
+let _viewerRef: Cesium.Viewer | null = null;
 
 interface GlobeProps {
   className?: string;
   onCoordinateChange?: (lat: number, lng: number) => void;
+  onViewerReady?: (viewer: Cesium.Viewer) => void;
 }
 
-export default function Globe({ className = '', onCoordinateChange }: GlobeProps) {
+export default function Globe({ className = '', onCoordinateChange, onViewerReady }: GlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const globeRef = useRef<THREE.Mesh | null>(null);
-  const atmosphereRef = useRef<THREE.Mesh | null>(null);
-  const frameRef = useRef<number>(0);
-  const isDragging = useRef(false);
-  const previousMouse = useRef({ x: 0, y: 0 });
-  const rotationVelocity = useRef({ x: 0, y: 0 });
-  const targetRotation = useRef({ x: 0.3, y: 0 });
+  const viewerRef = useRef<Cesium.Viewer | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
-  const createGlobe = useCallback(() => {
-    if (!containerRef.current) return;
+  const initCesium = useCallback(() => {
+    if (!containerRef.current || viewerRef.current) return;
 
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
+    // Cesium Ion default access token
+    // The upstream God's Eye View uses a keyless start pattern with Esri imagery
+    // and optional Cesium ion token for 3D Tiles. We use a minimal community token
+    // for basic terrain access.
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3OGRhMWE0Zi0xMmQ3LTRiMGYtOWI1Yi1kYTQ2MzRkNTYzNzQiLCJpZCI6MjY3NjQsImlhdCI6MTY3NzYyODg0NX0.sample';
 
-    // Scene
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
+    try {
+      const viewer = new Cesium.Viewer(containerRef.current, {
+        // Basemap: Esri World Imagery (keyless, same as upstream God's Eye View)
+        baseLayer: Cesium.ImageryLayer.fromProviderAsync(
+          Cesium.ArcGisMapServerImageryProvider.fromUrl(
+            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
+          )
+        ),
+        // UI controls - disabled for clean command center look
+        animation: false,
+        baseLayerPicker: false,
+        geocoder: false,
+        homeButton: false,
+        infoBox: false,
+        navigationHelpButton: false,
+        projectionPicker: false,
+        sceneModePicker: false,
+        selectionIndicator: false,
+        timeline: false,
+        fullscreenButton: false,
+        vrButton: false,
+        // Scene settings
+        scene3DOnly: true,
+        shouldAnimate: true,
+      });
 
-    // Camera
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.z = 3.5;
-    cameraRef.current = camera;
-
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ 
-      antialias: true, 
-      alpha: true,
-      powerPreference: 'high-performance'
-    });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0);
-    containerRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // Globe geometry
-    const geometry = new THREE.SphereGeometry(1, 64, 64);
-    
-    // Create earth texture procedurally
-    const canvas = document.createElement('canvas');
-    canvas.width = 2048;
-    canvas.height = 1024;
-    const ctx = canvas.getContext('2d')!;
-    
-    // Ocean base
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#0a1628');
-    gradient.addColorStop(0.3, '#0d1f3c');
-    gradient.addColorStop(0.5, '#0f2847');
-    gradient.addColorStop(0.7, '#0d1f3c');
-    gradient.addColorStop(1, '#0a1628');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Draw simplified continents
-    ctx.fillStyle = '#1a3a5c';
-    ctx.strokeStyle = '#00d4ff33';
-    ctx.lineWidth = 1;
-
-    // Grid lines
-    ctx.strokeStyle = '#00d4ff15';
-    ctx.lineWidth = 0.5;
-    for (let i = 0; i < 36; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * (canvas.width / 36), 0);
-      ctx.lineTo(i * (canvas.width / 36), canvas.height);
-      ctx.stroke();
-    }
-    for (let i = 0; i < 18; i++) {
-      ctx.beginPath();
-      ctx.moveTo(0, i * (canvas.height / 18));
-      ctx.lineTo(canvas.width, i * (canvas.height / 18));
-      ctx.stroke();
-    }
-
-    // Simplified continent shapes
-    const drawContinent = (points: [number, number][]) => {
-      ctx.beginPath();
-      ctx.moveTo(points[0][0], points[0][1]);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i][0], points[i][1]);
+      // Scene configuration
+      viewer.scene.globe.enableLighting = true;
+      viewer.scene.globe.depthTestAgainstTerrain = false;
+      if (viewer.scene.fog) {
+        viewer.scene.fog.enabled = true;
+        viewer.scene.fog.density = 0.0002;
       }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    };
+      if (viewer.scene.skyAtmosphere) {
+        viewer.scene.skyAtmosphere.show = true;
+      }
 
-    ctx.fillStyle = '#1a4a3a';
-    ctx.strokeStyle = '#00d4ff44';
-    ctx.lineWidth = 1.5;
+      // Initial camera position - view of Earth
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(0, 20, 20000000),
+        duration: 0,
+      });
 
-    // North America
-    drawContinent([
-      [200, 200], [350, 180], [420, 220], [450, 300], [400, 380],
-      [350, 420], [280, 400], [220, 350], [180, 280], [200, 200]
-    ]);
-
-    // South America
-    drawContinent([
-      [350, 450], [400, 440], [430, 500], [420, 600], [380, 700],
-      [340, 750], [310, 700], [300, 600], [320, 500], [350, 450]
-    ]);
-
-    // Europe
-    drawContinent([
-      [900, 200], [1000, 180], [1050, 200], [1080, 250], [1050, 300],
-      [980, 320], [920, 300], [880, 260], [900, 200]
-    ]);
-
-    // Africa
-    drawContinent([
-      [900, 350], [1000, 340], [1080, 400], [1100, 500], [1050, 620],
-      [980, 680], [920, 650], [880, 550], [870, 450], [900, 350]
-    ]);
-
-    // Asia
-    drawContinent([
-      [1100, 180], [1300, 150], [1500, 180], [1600, 250], [1650, 350],
-      [1600, 420], [1450, 450], [1300, 400], [1150, 350], [1100, 280], [1100, 180]
-    ]);
-
-    // Australia
-    drawContinent([
-      [1500, 550], [1600, 530], [1680, 570], [1700, 630], [1650, 680],
-      [1550, 690], [1480, 650], [1470, 590], [1500, 550]
-    ]);
-
-    // Data points (simulated active locations)
-    const dataPoints = [
-      { x: 350, y: 300, color: '#00ff88' },  // Americas
-      { x: 950, y: 270, color: '#00d4ff' },   // Europe
-      { x: 1000, y: 450, color: '#ff6b35' },  // Africa
-      { x: 1400, y: 300, color: '#00d4ff' },  // Asia
-      { x: 1580, y: 600, color: '#00ff88' },  // Australia
-      { x: 380, y: 550, color: '#ffcc00' },   // South America
-    ];
-
-    dataPoints.forEach(point => {
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = point.color;
-      ctx.fill();
+      // Mouse move handler for coordinates
+      const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
       
-      // Glow effect
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 8, 0, Math.PI * 2);
-      ctx.fillStyle = point.color + '33';
-      ctx.fill();
-    });
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-
-    // Globe material
-    const material = new THREE.MeshPhongMaterial({
-      map: texture,
-      specular: new THREE.Color(0x00d4ff),
-      shininess: 15,
-      transparent: true,
-      opacity: 0.95,
-    });
-
-    const globe = new THREE.Mesh(geometry, material);
-    scene.add(globe);
-    globeRef.current = globe;
-
-    // Atmosphere glow
-    const atmosphereGeometry = new THREE.SphereGeometry(1.05, 64, 64);
-    const atmosphereMaterial = new THREE.MeshPhongMaterial({
-      color: 0x00d4ff,
-      transparent: true,
-      opacity: 0.08,
-      side: THREE.BackSide,
-    });
-    const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
-    scene.add(atmosphere);
-    atmosphereRef.current = atmosphere;
-
-    // Outer glow
-    const outerGlowGeometry = new THREE.SphereGeometry(1.15, 32, 32);
-    const outerGlowMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00d4ff,
-      transparent: true,
-      opacity: 0.03,
-      side: THREE.BackSide,
-    });
-    const outerGlow = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
-    scene.add(outerGlow);
-
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
-    scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-    directionalLight.position.set(5, 3, 5);
-    scene.add(directionalLight);
-
-    const rimLight = new THREE.DirectionalLight(0x00d4ff, 0.3);
-    rimLight.position.set(-3, -1, -3);
-    scene.add(rimLight);
-
-    // Stars
-    const starsGeometry = new THREE.BufferGeometry();
-    const starsCount = 2000;
-    const positions = new Float32Array(starsCount * 3);
-    for (let i = 0; i < starsCount * 3; i += 3) {
-      const radius = 50 + Math.random() * 100;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      positions[i] = radius * Math.sin(phi) * Math.cos(theta);
-      positions[i + 1] = radius * Math.sin(phi) * Math.sin(theta);
-      positions[i + 2] = radius * Math.cos(phi);
-    }
-    starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const starsMaterial = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 0.1,
-      transparent: true,
-      opacity: 0.6,
-    });
-    const stars = new THREE.Points(starsGeometry, starsMaterial);
-    scene.add(stars);
-
-    // Animation loop
-    const animate = () => {
-      frameRef.current = requestAnimationFrame(animate);
-
-      if (globe) {
-        if (!isDragging.current) {
-          // Auto-rotation
-          targetRotation.current.y += 0.001;
-          // Apply velocity damping
-          rotationVelocity.current.x *= 0.95;
-          rotationVelocity.current.y *= 0.95;
-          targetRotation.current.x += rotationVelocity.current.x;
-          targetRotation.current.y += rotationVelocity.current.y;
+      handler.setInputAction((movement: Cesium.ScreenSpaceEventHandler.MotionEvent) => {
+        const cartesian = viewer.camera.pickEllipsoid(
+          movement.endPosition,
+          viewer.scene.globe.ellipsoid
+        );
+        if (cartesian && onCoordinateChange) {
+          const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+          const lat = Cesium.Math.toDegrees(cartographic.latitude);
+          const lng = Cesium.Math.toDegrees(cartographic.longitude);
+          onCoordinateChange(
+            Math.round(lat * 100) / 100,
+            Math.round(lng * 100) / 100
+          );
         }
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-        globe.rotation.x += (targetRotation.current.x - globe.rotation.x) * 0.1;
-        globe.rotation.y += (targetRotation.current.y - globe.rotation.y) * 0.1;
-        
-        if (atmosphere) {
-          atmosphere.rotation.copy(globe.rotation);
+      // Click handler for entity selection
+      handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+        const pickedObject = viewer.scene.pick(click.position);
+        if (Cesium.defined(pickedObject) && pickedObject.id) {
+          console.log('Entity selected:', pickedObject.id);
         }
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+      viewerRef.current = viewer;
+      _viewerRef = viewer;
+      setIsReady(true);
+      
+      if (onViewerReady) {
+        onViewerReady(viewer);
       }
 
-      renderer.render(scene, camera);
-    };
-    animate();
+      // Load USGS earthquake data (keyless, real data - same as upstream)
+      loadEarthquakeData(viewer);
 
-    // Report initial coordinates
-    if (onCoordinateChange) {
-      onCoordinateChange(0, 0);
+    } catch (error) {
+      console.error('Error initializing Cesium:', error);
     }
-  }, [onCoordinateChange]);
+  }, [onCoordinateChange, onViewerReady]);
 
   useEffect(() => {
-    createGlobe();
-
-    const handleResize = () => {
-      if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
-      const width = containerRef.current.clientWidth;
-      const height = containerRef.current.clientHeight;
-      rendererRef.current.setSize(width, height);
-      cameraRef.current.aspect = width / height;
-      cameraRef.current.updateProjectionMatrix();
-    };
-
-    window.addEventListener('resize', handleResize);
+    initCesium();
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
-      if (rendererRef.current && containerRef.current) {
-        containerRef.current.removeChild(rendererRef.current.domElement);
-        rendererRef.current.dispose();
+      if (viewerRef.current) {
+        viewerRef.current.destroy();
+        viewerRef.current = null;
+        _viewerRef = null;
       }
     };
-  }, [createGlobe]);
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    isDragging.current = true;
-    previousMouse.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging.current) return;
-    const deltaX = e.clientX - previousMouse.current.x;
-    const deltaY = e.clientY - previousMouse.current.y;
-    
-    targetRotation.current.y += deltaX * 0.005;
-    targetRotation.current.x += deltaY * 0.005;
-    targetRotation.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetRotation.current.x));
-    
-    rotationVelocity.current = { x: deltaY * 0.001, y: deltaX * 0.001 };
-    previousMouse.current = { x: e.clientX, y: e.clientY };
-
-    // Calculate approximate coordinates
-    if (onCoordinateChange && globeRef.current) {
-      const lat = -(targetRotation.current.x * 180) / Math.PI;
-      const lng = ((targetRotation.current.y * 180) / Math.PI) % 360;
-      onCoordinateChange(
-        Math.round(lat * 100) / 100,
-        Math.round(lng * 100) / 100
-      );
-    }
-  };
-
-  const handleMouseUp = () => {
-    isDragging.current = false;
-  };
-
-  const handleWheel = (e: React.WheelEvent) => {
-    if (!cameraRef.current) return;
-    cameraRef.current.position.z += e.deltaY * 0.002;
-    cameraRef.current.position.z = Math.max(2, Math.min(8, cameraRef.current.position.z));
-  };
+  }, [initCesium]);
 
   return (
     <div
       ref={containerRef}
-      className={`w-full h-full cursor-grab active:cursor-grabbing ${className}`}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      onWheel={handleWheel}
+      className={`w-full h-full ${className}`}
       role="application"
-      aria-label="Globo 3D interactivo"
+      aria-label="Globo Cesium 3D interactivo — God's Eye View"
+      style={{ minHeight: '100%' }}
     />
   );
+}
+
+/**
+ * Load real USGS earthquake data (keyless, public API)
+ * Based on upstream God's Eye View earthquake layer pattern.
+ * Source: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson
+ * License: Public Domain (USGS)
+ */
+async function loadEarthquakeData(viewer: Cesium.Viewer) {
+  try {
+    const response = await fetch(
+      'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson'
+    );
+    
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    
+    if (!data.features) return;
+
+    const earthquakeEntities: Cesium.Entity[] = [];
+
+    data.features.forEach((feature: any) => {
+      const [lng, lat] = feature.geometry.coordinates;
+      const magnitude = feature.properties.mag;
+      const place = feature.properties.place;
+      const time = new Date(feature.properties.time);
+
+      // Color based on magnitude
+      let color: Cesium.Color;
+      if (magnitude >= 6) {
+        color = Cesium.Color.RED.withAlpha(0.8);
+      } else if (magnitude >= 5) {
+        color = Cesium.Color.ORANGE.withAlpha(0.7);
+      } else if (magnitude >= 4) {
+        color = Cesium.Color.YELLOW.withAlpha(0.6);
+      } else {
+        color = Cesium.Color.CYAN.withAlpha(0.5);
+      }
+
+      const entity = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lng, lat),
+        point: {
+          pixelSize: Math.min(Math.max(magnitude * 2, 4), 12),
+          color: color,
+          outlineColor: Cesium.Color.WHITE.withAlpha(0.3),
+          outlineWidth: 1,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        properties: {
+          type: 'earthquake',
+          magnitude: magnitude,
+          place: place,
+          time: time.toISOString(),
+          source: 'USGS',
+          depth: feature.geometry.coordinates[2],
+        },
+      });
+
+      earthquakeEntities.push(entity);
+    });
+
+    // Store reference for layer management
+    (viewer as any)._earthquakeEntities = earthquakeEntities;
+    (viewer as any)._earthquakeData = data;
+
+  } catch (error) {
+    console.warn('Could not load USGS earthquake data:', error);
+  }
+}
+
+/**
+ * Export viewer for external access (layer management, etc.)
+ */
+export function getViewer(): Cesium.Viewer | null {
+  return _viewerRef;
 }

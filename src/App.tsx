@@ -5,12 +5,12 @@ import {
   Shield, Bell, Settings, HelpCircle, ChevronLeft, ChevronRight,
   MapPin, Clock, Ruler, Camera as CameraIcon, Download,
   Bot, Command, Mic, MicOff, Palette, Eye, Target,
-  Crosshair, Zap, Brain, CheckCircle2, XCircle, AlertCircle,
-  Info, X, Menu, Globe2, BarChart3, Activity, Navigation
+  Crosshair, Zap, Brain, Activity, Navigation,
+  BarChart3, Globe2, Wifi, WifiOff
 } from 'lucide-react';
 import Globe3D from './components/Globe';
 import { t, Locale, getLocaleName } from './i18n';
-import { dataSources, resources, getActiveSourcesCount, getNotConfiguredCount } from './data/sources';
+import { dataSources, resources, getActiveSourcesCount, getNotConfiguredCount, getKeylessSourcesCount } from './data/sources';
 import type { ResourceStatus, OperationalMode, MicrophoneState } from './types';
 
 function App() {
@@ -27,6 +27,7 @@ function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [dontShowMission, setDontShowMission] = useState(false);
   const [selectedResource, setSelectedResource] = useState<string | null>(null);
+  const [globeReady, setGlobeReady] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -40,6 +41,10 @@ function App() {
 
   const handleCoordinateChange = useCallback((lat: number, lng: number) => {
     setCoordinates({ lat, lng });
+  }, []);
+
+  const handleViewerReady = useCallback(() => {
+    setGlobeReady(true);
   }, []);
 
   const getStatusColor = (status: ResourceStatus): string => {
@@ -134,6 +139,10 @@ function App() {
     }
   };
 
+  const activeCount = getActiveSourcesCount();
+  const notConfiguredCount = getNotConfiguredCount();
+  const keylessCount = getKeylessSourcesCount();
+
   return (
     <div className="h-screen w-screen flex flex-col bg-[#0a0e17] text-slate-200 overflow-hidden select-none">
       {/* TOP HEADER */}
@@ -184,21 +193,26 @@ function App() {
         {/* System Status */}
         <div className="hidden md:flex items-center gap-3 ml-3 text-[10px]">
           <div className="flex items-center gap-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-slate-400">{t('status.operational', locale)}</span>
+            {globeReady ? (
+              <>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-slate-400">Cesium {t('status.operational', locale)}</span>
+              </>
+            ) : (
+              <>
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-slate-400">Cesium {t('status.loading', locale)}</span>
+              </>
+            )}
           </div>
           <div className="text-slate-600">|</div>
           <span className="text-slate-500">
-            {getActiveSourcesCount()} {t('status.active', locale).toLowerCase()}
+            {activeCount} {t('status.active', locale).toLowerCase()}
           </span>
-          {getNotConfiguredCount() > 0 && (
-            <>
-              <div className="text-slate-600">|</div>
-              <span className="text-amber-500/70">
-                {getNotConfiguredCount()} {t('status.notConfigured', locale).toLowerCase()}
-              </span>
-            </>
-          )}
+          <div className="text-slate-600">|</div>
+          <span className="text-amber-500/70">
+            {notConfiguredCount} {t('status.notConfigured', locale).toLowerCase()}
+          </span>
         </div>
 
         {/* Time */}
@@ -243,7 +257,7 @@ function App() {
             className="p-1.5 rounded hover:bg-slate-800/50 text-slate-400 hover:text-slate-200"
             aria-label={t('mission.title', locale)}
           >
-            <Menu size={16} />
+            <Command size={16} />
           </button>
         </div>
       </header>
@@ -317,9 +331,9 @@ function App() {
                         </button>
                       ))}
                       {catSources.map(src => (
-                        <button
+                        <div
                           key={src.id}
-                          className="w-full flex items-center gap-2 px-6 py-1.5 text-[11px] hover:bg-slate-800/20 transition-colors"
+                          className="flex items-center gap-2 px-6 py-1.5 text-[11px]"
                         >
                           <span className={`w-1.5 h-1.5 rounded-full ${
                             src.status === 'active' ? 'bg-emerald-400' :
@@ -330,7 +344,10 @@ function App() {
                           <span className={`text-[9px] ${getStatusColor(src.status)}`}>
                             {getStatusText(src.status)}
                           </span>
-                        </button>
+                          {src.requiresAuth && (
+                            <span title="Requiere clave"><WifiOff size={9} className="text-amber-500/50" /></span>
+                          )}
+                        </div>
                       ))}
                       {!hasContent && (
                         <div className="px-6 py-2 text-[10px] text-slate-600 italic">
@@ -342,6 +359,14 @@ function App() {
                 </div>
               );
             })}
+          </div>
+
+          {/* Panel footer with source summary */}
+          <div className="p-2 border-t border-slate-800/50 text-[9px] text-slate-600">
+            <div className="flex justify-between">
+              <span>{keylessCount} sin clave</span>
+              <span>{dataSources.length - keylessCount} requieren clave</span>
+            </div>
           </div>
         </aside>
 
@@ -358,7 +383,10 @@ function App() {
 
         {/* CENTER - GLOBE */}
         <main className="flex-1 relative overflow-hidden">
-          <Globe3D onCoordinateChange={handleCoordinateChange} />
+          <Globe3D 
+            onCoordinateChange={handleCoordinateChange}
+            onViewerReady={handleViewerReady}
+          />
           
           {/* Globe overlay info */}
           <div className="absolute top-3 left-3 bg-[#0d1320]/80 backdrop-blur-sm border border-slate-700/30 rounded-md px-3 py-2 text-[10px]">
@@ -367,6 +395,10 @@ function App() {
               <span className="font-mono">
                 {coordinates.lat.toFixed(2)}°, {coordinates.lng.toFixed(2)}°
               </span>
+            </div>
+            <div className="flex items-center gap-2 text-slate-500 mt-0.5">
+              <Globe2 size={9} />
+              <span className="text-[9px]">CesiumJS · Esri World Imagery</span>
             </div>
           </div>
 
@@ -385,6 +417,11 @@ function App() {
             <button className="p-2 bg-[#0d1320]/80 backdrop-blur-sm border border-slate-700/30 rounded-md text-slate-400 hover:text-cyan-300 hover:border-cyan-500/30 transition-colors" title={t('globe.north', locale)}>
               <Navigation size={14} />
             </button>
+          </div>
+
+          {/* Upstream attribution */}
+          <div className="absolute bottom-2 left-3 text-[8px] text-slate-600">
+            Motor: CesiumJS · Basado en God's Eye View (MIT) · bilawalsidhu/gods-eye-view
           </div>
         </main>
 
@@ -460,7 +497,7 @@ function App() {
                   </h3>
                   <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] ${getStatusBg(resources.find(r => r.id === selectedResource)?.status || 'notAvailable')}`}>
                     <div className={`w-1.5 h-1.5 rounded-full ${
-                      resources.find(r => r.id === selectedResource)?.status === 'active' ? 'bg-emerald-400' :
+                      resources.find(r => r.id === selectedResource)?.status === 'active' || resources.find(r => r.id === selectedResource)?.status === 'operational' ? 'bg-emerald-400' :
                       resources.find(r => r.id === selectedResource)?.status === 'comingSoon' ? 'bg-slate-500' :
                       'bg-amber-400'
                     }`} />
@@ -487,6 +524,7 @@ function App() {
                   </h3>
                   <div className="bg-slate-800/30 rounded-md p-2.5 border border-slate-700/30">
                     <p className="text-[10px] text-slate-500 italic">{t('evidence.noEvidence', locale)}</p>
+                    <p className="text-[9px] text-slate-600 mt-1">Arquitectura preparada — Motor de Evidencias pendiente de implementación</p>
                   </div>
                 </section>
 
@@ -604,7 +642,7 @@ function App() {
                   className="p-1.5 rounded hover:bg-slate-800/50 text-slate-500 hover:text-slate-300"
                   aria-label={t('mission.close', locale)}
                 >
-                  <X size={18} />
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>
             </div>
