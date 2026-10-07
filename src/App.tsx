@@ -6,12 +6,16 @@ import {
   MapPin, Clock, Ruler, Camera as CameraIcon, Download,
   Bot, Command, Mic, MicOff, Palette, Eye, Target,
   Crosshair, Zap, Brain, Activity, Navigation,
-  BarChart3, Globe2, Wifi, WifiOff
+  BarChart3, Globe2, Wifi, WifiOff, CheckCircle2, AlertCircle
 } from 'lucide-react';
 import Globe3D from './components/Globe';
 import { t, Locale, getLocaleName } from './i18n';
 import { dataSources, resources, getActiveSourcesCount, getNotConfiguredCount, getKeylessSourcesCount } from './data/sources';
 import type { ResourceStatus, OperationalMode, MicrophoneState } from './types';
+import { useSources } from './hooks/useSources';
+import { captureEvidence, listEvidence, verifyEvidence } from './services/evidence/engine';
+import { recordAuditEvent, listAuditEvents } from './services/audit/engine';
+import type { GeoEntity } from './services/sources/types';
 
 function App() {
   const [locale, setLocale] = useState<Locale>('es-ES');
@@ -28,6 +32,65 @@ function App() {
   const [dontShowMission, setDontShowMission] = useState(false);
   const [selectedResource, setSelectedResource] = useState<string | null>(null);
   const [globeReady, setGlobeReady] = useState(false);
+  const [selectedEntity, setSelectedEntity] = useState<GeoEntity | null>(null);
+  const [evidenceCount, setEvidenceCount] = useState(0);
+  
+  // Source management
+  const { sources, isInitialized, fetchSource, enableSource, disableSource, startAutoRefresh, getAllEntities } = useSources();
+  
+  // Initialize sources on mount
+  useEffect(() => {
+    if (isInitialized) {
+      // Auto-enable USGS earthquakes (keyless, verified)
+      enableSource('usgs-earthquakes');
+      startAutoRefresh('usgs-earthquakes');
+      
+      // Load evidence count
+      listEvidence().then(ev => setEvidenceCount(ev.length));
+      
+      recordAuditEvent('MISSION_STARTED', 'app', {
+        actor: 'user',
+        metadata: { mode: activeMode },
+      });
+    }
+  }, [isInitialized]);
+  
+  // Handle entity selection from globe
+  const handleEntitySelect = useCallback(async (entity: GeoEntity) => {
+    setSelectedEntity(entity);
+    setRightPanelOpen(true);
+    
+    await recordAuditEvent('ENTITY_SELECTED', entity.type, {
+      actor: 'user',
+      resourceId: entity.id,
+      metadata: {
+        sourceId: entity.sourceId,
+        name: entity.name,
+        coordinates: entity.position,
+      },
+    });
+  }, []);
+  
+  // Capture evidence for selected entity
+  const handleCaptureEvidence = useCallback(async () => {
+    if (!selectedEntity) return;
+    
+    try {
+      await captureEvidence(selectedEntity);
+      setEvidenceCount(prev => prev + 1);
+      
+      await recordAuditEvent('EVIDENCE_CAPTURED', selectedEntity.type, {
+        actor: 'user',
+        resourceId: selectedEntity.id,
+        metadata: { sourceId: selectedEntity.sourceId },
+      });
+      
+      alert('Evidencia capturada correctamente');
+    } catch (error) {
+      console.error('Error capturing evidence:', error);
+      alert('Error al capturar evidencia');
+    }
+  }, [selectedEntity]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -386,6 +449,8 @@ function App() {
           <Globe3D 
             onCoordinateChange={handleCoordinateChange}
             onViewerReady={handleViewerReady}
+            entities={getAllEntities()}
+            onEntitySelect={handleEntitySelect}
           />
           
           {/* Globe overlay info */}
@@ -443,7 +508,7 @@ function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
-            {!selectedResource ? (
+            {!selectedEntity ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
                 <MapPin size={32} className="text-slate-700 mb-3" />
                 <p className="text-xs text-slate-500 mb-1">{t('context.noSelection', locale)}</p>
@@ -458,10 +523,10 @@ function App() {
                   </h3>
                   <div className="bg-slate-800/30 rounded-md p-2.5 border border-slate-700/30">
                     <p className="text-xs text-slate-200 font-medium">
-                      {resources.find(r => r.id === selectedResource)?.name || t('context.notAvailable', locale)}
+                      {selectedEntity.name || selectedEntity.type}
                     </p>
                     <p className="text-[10px] text-slate-500 mt-0.5">
-                      {resources.find(r => r.id === selectedResource)?.description}
+                      Tipo: {selectedEntity.type} {selectedEntity.subtype && `(${selectedEntity.subtype})`}
                     </p>
                   </div>
                 </section>
@@ -473,10 +538,18 @@ function App() {
                   </h3>
                   <div className="bg-slate-800/30 rounded-md p-2.5 border border-slate-700/30">
                     <p className="text-xs text-slate-300">
-                      {resources.find(r => r.id === selectedResource)?.source || (
-                        <span className="text-slate-600 italic">{t('context.sourceUnverified', locale)}</span>
-                      )}
+                      {selectedEntity.provenance.sourceName}
                     </p>
+                    {selectedEntity.provenance.sourceUrl && (
+                      <a 
+                        href={selectedEntity.provenance.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-cyan-400 hover:text-cyan-300 underline mt-1 block"
+                      >
+                        Abrir fuente original
+                      </a>
+                    )}
                   </div>
                 </section>
 
@@ -486,34 +559,40 @@ function App() {
                     {t('context.coordinates', locale)}
                   </h3>
                   <div className="bg-slate-800/30 rounded-md p-2.5 border border-slate-700/30 font-mono text-[11px] text-cyan-300/80">
-                    {coordinates.lat.toFixed(4)}°, {coordinates.lng.toFixed(4)}°
+                    <div>LAT {selectedEntity.position.latitude.toFixed(4)}°</div>
+                    <div>LNG {selectedEntity.position.longitude.toFixed(4)}°</div>
+                    {selectedEntity.position.altitude && (
+                      <div>ALT {selectedEntity.position.altitude.toFixed(0)}m</div>
+                    )}
                   </div>
                 </section>
 
-                {/* Status */}
+                {/* Timestamp */}
                 <section>
                   <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                    Estado
+                    {t('context.dateTime', locale)}
                   </h3>
-                  <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] ${getStatusBg(resources.find(r => r.id === selectedResource)?.status || 'notAvailable')}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${
-                      resources.find(r => r.id === selectedResource)?.status === 'active' || resources.find(r => r.id === selectedResource)?.status === 'operational' ? 'bg-emerald-400' :
-                      resources.find(r => r.id === selectedResource)?.status === 'comingSoon' ? 'bg-slate-500' :
-                      'bg-amber-400'
-                    }`} />
-                    <span className={getStatusColor(resources.find(r => r.id === selectedResource)?.status || 'notAvailable')}>
-                      {getStatusText(resources.find(r => r.id === selectedResource)?.status || 'notAvailable')}
-                    </span>
+                  <div className="bg-slate-800/30 rounded-md p-2.5 border border-slate-700/30">
+                    <p className="text-[10px] text-slate-400 font-mono">
+                      {new Date(selectedEntity.timestamp).toLocaleString('es-ES')}
+                    </p>
                   </div>
                 </section>
 
-                {/* Metadata */}
+                {/* Properties */}
                 <section>
                   <h3 className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
                     {t('context.metadata', locale)}
                   </h3>
                   <div className="bg-slate-800/30 rounded-md p-2.5 border border-slate-700/30">
-                    <p className="text-[10px] text-slate-500 italic">{t('context.notAvailable', locale)}</p>
+                    {Object.entries(selectedEntity.properties).slice(0, 8).map(([key, value]) => (
+                      <div key={key} className="flex justify-between text-[10px] py-0.5">
+                        <span className="text-slate-500">{key}:</span>
+                        <span className="text-slate-300 font-mono max-w-[120px] truncate">
+                          {typeof value === 'number' ? value.toFixed(2) : String(value || '—')}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </section>
 
@@ -523,8 +602,12 @@ function App() {
                     {t('context.evidence', locale)}
                   </h3>
                   <div className="bg-slate-800/30 rounded-md p-2.5 border border-slate-700/30">
-                    <p className="text-[10px] text-slate-500 italic">{t('evidence.noEvidence', locale)}</p>
-                    <p className="text-[9px] text-slate-600 mt-1">Arquitectura preparada — Motor de Evidencias pendiente de implementación</p>
+                    <p className="text-[10px] text-slate-500">
+                      {evidenceCount > 0 
+                        ? `${evidenceCount} evidencias registradas`
+                        : t('evidence.noEvidence', locale)
+                      }
+                    </p>
                   </div>
                 </section>
 
@@ -534,14 +617,14 @@ function App() {
                     {t('context.actions', locale)}
                   </h3>
                   <div className="flex flex-wrap gap-1.5">
-                    <button className="flex items-center gap-1 px-2 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded text-[10px] text-cyan-300 hover:bg-cyan-500/20 transition-colors">
-                      <Eye size={10} /> Ver
+                    <button 
+                      onClick={handleCaptureEvidence}
+                      className="flex items-center gap-1 px-2 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded text-[10px] text-cyan-300 hover:bg-cyan-500/20 transition-colors"
+                    >
+                      <Shield size={10} /> Capturar evidencia
                     </button>
                     <button className="flex items-center gap-1 px-2 py-1 bg-slate-700/30 border border-slate-600/30 rounded text-[10px] text-slate-400 hover:bg-slate-700/50 transition-colors">
                       <Download size={10} /> Exportar
-                    </button>
-                    <button className="flex items-center gap-1 px-2 py-1 bg-slate-700/30 border border-slate-600/30 rounded text-[10px] text-slate-400 hover:bg-slate-700/50 transition-colors">
-                      <CameraIcon size={10} /> Captura
                     </button>
                   </div>
                 </section>

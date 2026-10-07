@@ -4,13 +4,17 @@ import * as Cesium from 'cesium';
 // Module-level viewer ref for export
 let _viewerRef: Cesium.Viewer | null = null;
 
+import type { GeoEntity } from '../services/sources/types';
+
 interface GlobeProps {
   className?: string;
   onCoordinateChange?: (lat: number, lng: number) => void;
   onViewerReady?: (viewer: Cesium.Viewer) => void;
+  entities?: GeoEntity[];
+  onEntitySelect?: (entity: GeoEntity) => void;
 }
 
-export default function Globe({ className = '', onCoordinateChange, onViewerReady }: GlobeProps) {
+export default function Globe({ className = '', onCoordinateChange, onViewerReady, entities = [], onEntitySelect }: GlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Cesium.Viewer | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -90,7 +94,12 @@ export default function Globe({ className = '', onCoordinateChange, onViewerRead
       handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
         const pickedObject = viewer.scene.pick(click.position);
         if (Cesium.defined(pickedObject) && pickedObject.id) {
-          console.log('Entity selected:', pickedObject.id);
+          const cesiumEntity = pickedObject.id;
+          const geoEntity = (cesiumEntity as any)._geoEntity;
+          if (geoEntity && onEntitySelect) {
+            onEntitySelect(geoEntity);
+          }
+          console.log('Entity selected:', geoEntity || cesiumEntity.id);
         }
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
@@ -121,6 +130,70 @@ export default function Globe({ className = '', onCoordinateChange, onViewerRead
       }
     };
   }, [initCesium]);
+
+  // Update entities on the globe
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    // Remove existing dynamic entities
+    const entitiesToRemove: string[] = [];
+    viewer.entities.values.forEach(entity => {
+      if (entity.id.startsWith('dynamic_')) {
+        entitiesToRemove.push(entity.id);
+      }
+    });
+    entitiesToRemove.forEach(id => viewer.entities.removeById(id));
+
+    // Add new entities
+    entities.forEach((geoEntity, index) => {
+      let color: Cesium.Color;
+      let pixelSize = 8;
+
+      switch (geoEntity.type) {
+        case 'earthquake':
+          const mag = geoEntity.properties.magnitude || 2.5;
+          if (mag >= 6) color = Cesium.Color.RED;
+          else if (mag >= 5) color = Cesium.Color.ORANGE;
+          else if (mag >= 4) color = Cesium.Color.YELLOW;
+          else color = Cesium.Color.CYAN;
+          pixelSize = Math.min(Math.max(mag * 2, 4), 16);
+          break;
+        case 'satellite':
+          color = Cesium.Color.fromCssColorString('#00ff88');
+          pixelSize = 6;
+          break;
+        case 'aircraft':
+          color = Cesium.Color.fromCssColorString('#ff6b35');
+          pixelSize = 5;
+          break;
+        default:
+          color = Cesium.Color.WHITE;
+      }
+
+      const entity = viewer.entities.add({
+        id: `dynamic_${geoEntity.id}_${index}`,
+        position: Cesium.Cartesian3.fromDegrees(
+          geoEntity.position.longitude,
+          geoEntity.position.latitude,
+          geoEntity.position.altitude || 0
+        ),
+        point: {
+          pixelSize,
+          color: color.withAlpha(0.8),
+          outlineColor: Cesium.Color.WHITE.withAlpha(0.3),
+          outlineWidth: 1,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        properties: {
+          geoEntity: geoEntity,
+        },
+      });
+
+      // Store reference for selection
+      (entity as any)._geoEntity = geoEntity;
+    });
+  }, [entities]);
 
   return (
     <div
